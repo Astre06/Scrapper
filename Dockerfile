@@ -1,5 +1,7 @@
 # Use official Python 3.10 image
-FROM python:3.10-slim
+FROM python:3.10-alpine
+
+RUN apk add --no-cache gcc musl-dev
 
 # Set working directory
 WORKDIR /app
