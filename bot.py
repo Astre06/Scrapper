@@ -1,41 +1,46 @@
 import logging
+import os
+import subprocess
+from glob import glob
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import subprocess
-from telethon.sync import TelegramClient
+from telethon import TelegramClient
 from telethon.sessions import StringSession
-import os
-from glob import glob
 
-BOT_TOKEN = "7864344868:AAFeK9th61ps_7Mc01ttE-4CSQE2DjYPE50"
-api_id = 28606113
-api_hash = "2eb35c593e9f213f26d0afb4472396d4"
-
+# Setup logging to Render logs
 logging.basicConfig(level=logging.INFO)
 
+# Load credentials from environment variables
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+api_id = int(os.getenv("API_ID"))
+api_hash = os.getenv("API_HASH")
 
 async def login_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logging.info("Received /login command.")
     await update.message.reply_text("Starting login. Please wait...")
+
     try:
-        with TelegramClient(StringSession(), api_id, api_hash) as client:
-            client.start()
-            session_str = client.session.save()
-            with open("tg_cli_scraper.session", "w") as f:
-                f.write(session_str)
+        client = TelegramClient(StringSession(), api_id, api_hash)
+        await client.start()
+        session_str = client.session.save()
+        with open("tg_cli_scraper.session", "w") as f:
+            f.write(session_str)
+        await client.disconnect()
         await update.message.reply_text("✅ Login complete and session saved.")
+        logging.info("Session saved successfully.")
     except Exception as e:
+        logging.error(f"Login failed: {e}")
         await update.message.reply_text(f"❌ Login failed: {e}")
 
-
 async def scrap_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logging.info("Received /scrap command.")
     if not context.args:
         await update.message.reply_text("Usage: /scrap @group [amount] [bin] [country]")
         return
 
+    args_str = ' '.join(context.args)
+    await update.message.reply_text(f"🟡 Starting scraping with: {args_str}")
     cmd = ["python", "scraper.py"] + context.args
-    await update.message.reply_text(
-        f"🟡 Starting scraping with: {' '.join(context.args)}"
-    )
 
     try:
         subprocess.run(cmd, timeout=900)
@@ -49,14 +54,16 @@ async def scrap_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if files:
             await update.message.reply_document(document=open(files[0], "rb"))
+            logging.info(f"Sent file: {files[0]}")
         else:
             await update.message.reply_text("❌ No output file found.")
     except subprocess.TimeoutExpired:
         await update.message.reply_text("❌ Scraping timed out.")
-
+        logging.warning("Scraping process timed out.")
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("login", login_handler))
     app.add_handler(CommandHandler("scrap", scrap_handler))
+    logging.info("Bot is starting...")
     app.run_polling()
