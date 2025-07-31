@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+no_valid_codes.signal
+Scrap By Raven - *.txt
+.env
