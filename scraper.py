@@ -3,11 +3,16 @@ import os
 import sys
 import asyncio
 import aiohttp
+import logging
 from telethon import TelegramClient
 
-api_id = 28606113
-api_hash = "2eb35c593e9f213f26d0afb4472396d4"
+# Load API credentials from environment
+api_id = int(os.getenv("API_ID", 0))
+api_hash = os.getenv("API_HASH", "")
 session_name = "tg_cli_scraper"
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
 code_regex = re.compile(r"\b(\d{16})\|(\d{2})\|(\d{2})\|(\d{3,4})\b")
 bin_country_cache = {}
@@ -28,7 +33,7 @@ def parse_args():
     global target_group, code_limit, bin_prefix, country_filter, message_filter
     args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
     if len(args) < 1 or args[0].lower() == "all":
-        print("Usage: /scrap @group [amount] [bin_prefix] [country] [keyword]")
+        logging.error("Usage: /scrap @group [amount] [bin_prefix] [country] [keyword]")
         sys.exit(1)
 
     target_group = args[0].lstrip("@")
@@ -59,8 +64,8 @@ async def check_bin_country(bin6):
                     code = match.group(1).upper()
                     bin_country_cache[bin6] = code
                     return code
-    except:
-        pass
+    except Exception as e:
+        logging.warning(f"BIN check error for {bin6}: {e}")
     bin_country_cache[bin6] = None
     return None
 
@@ -68,10 +73,15 @@ async def run_scraper():
     global OUTPUT_FILE
     parse_args()
 
+    if not os.path.exists(session_name + ".session"):
+        logging.error("❌ Telegram session file not found. Use /login first.")
+        return
+
     client = TelegramClient(session_name, api_id, api_hash)
     await client.connect()
+
     if not await client.is_user_authorized():
-        print("❗ Telegram login required. Use /login in your bot chat.")
+        logging.error("❗ Telegram login required. Run /login in the bot.")
         return
 
     entity = await client.get_entity(target_group)
@@ -80,8 +90,7 @@ async def run_scraper():
     async for message in client.iter_messages(entity, limit=None):
         if not message.message:
             continue
-
-        if message_filter and message_filter not in message.message:
+        if message_filter and message_filter not in message.message.lower():
             continue
 
         clean = (
@@ -104,7 +113,7 @@ async def run_scraper():
                     continue
             found_codes.add(full)
             collected.append(full)
-            print("[+] " + full)
+            logging.info(f"[+] {full}")
             if code_limit and len(collected) >= code_limit:
                 break
 
@@ -113,10 +122,10 @@ async def run_scraper():
         with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
             for c in collected:
                 f.write(c + "\n")
-        print(f"✅ Saved {len(collected)} codes to {OUTPUT_FILE}")
+        logging.info(f"✅ Saved {len(collected)} codes to {OUTPUT_FILE}")
     else:
         open("no_valid_codes.signal", "w").close()
-        print("❌ No valid codes found.")
+        logging.info("❌ No valid codes found.")
 
 if __name__ == "__main__":
     asyncio.run(run_scraper())
