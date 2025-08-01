@@ -6,12 +6,10 @@ import aiohttp
 import logging
 from telethon import TelegramClient
 
-# Load API credentials from environment
 api_id = int(os.getenv("API_ID", 0))
 api_hash = os.getenv("API_HASH", "")
 session_name = "tg_cli_scraper"
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 
 code_regex = re.compile(r"\b(\d{16})\|(\d{2})\|(\d{2})\|(\d{3,4})\b")
@@ -74,17 +72,22 @@ async def run_scraper():
     parse_args()
 
     if not os.path.exists(session_name + ".session"):
-        logging.error("❌ Telegram session file not found. Use /login first.")
+        logging.error("❌ Telegram session not found. Please use /login first.")
         return
 
     client = TelegramClient(session_name, api_id, api_hash)
     await client.connect()
 
     if not await client.is_user_authorized():
-        logging.error("❗ Telegram login required. Run /login in the bot.")
+        logging.error("❗ Session invalid. Run /login again.")
         return
 
-    entity = await client.get_entity(target_group)
+    try:
+        entity = await client.get_entity(target_group)
+    except Exception as e:
+        logging.error(f"❌ Cannot access group @{target_group}: {e}")
+        return
+
     collected = []
 
     async for message in client.iter_messages(entity, limit=None):
@@ -104,12 +107,12 @@ async def run_scraper():
             full = "|".join(match)
             if full in found_codes:
                 continue
-            if bin_prefix and not match[0].startswith(bin_prefix[: len(bin_prefix)]):
+            if bin_prefix and not match[0].startswith(bin_prefix):
                 continue
             if country_filter:
                 bin6 = match[0][:6]
                 country = await check_bin_country(bin6)
-                if not country or country_filter.upper() not in country.upper():
+                if not country or country_filter.upper() != country.upper():
                     continue
             found_codes.add(full)
             collected.append(full)
