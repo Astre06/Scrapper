@@ -1,134 +1,113 @@
 import re
-import os
 import sys
 import asyncio
 import aiohttp
 import logging
 from telethon import TelegramClient
+from telethon.errors import SessionPasswordNeededError
 
-api_id = int(os.getenv("API_ID", 0))
-api_hash = os.getenv("API_HASH", "")
-session_name = "tg_cli_scraper"
-
-logging.basicConfig(level=logging.INFO)
-
+api_id = 28606113
+api_hash = "2eb35c593e9f213f26d0afb4472396d4"
 code_regex = re.compile(r"\b(\d{16})\|(\d{2})\|(\d{2})\|(\d{3,4})\b")
 bin_country_cache = {}
+found_codes = set()
 
-OUTPUT_FILE = None
-target_group = ""
+target_group = None
 code_limit = None
 bin_prefix = None
 country_filter = None
 message_filter = None
-found_codes = set()
 
-def get_output_filename(count):
-    suffix = f" - {country_filter.upper()}" if country_filter else ""
-    return f"Scrap By Raven - {count}{suffix}.txt"
+logging.basicConfig(level=logging.INFO)
+
 
 def parse_args():
     global target_group, code_limit, bin_prefix, country_filter, message_filter
     args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
-    if len(args) < 1 or args[0].lower() == "all":
-        logging.error("Usage: /scrap @group [amount] [bin_prefix] [country] [keyword]")
+
+    if len(args) < 1:
+        logging.error("Usage: scraper.py @group [amount] [bin_prefix] [country] [keyword]")
         sys.exit(1)
 
     target_group = args[0].lstrip("@")
 
     for arg in args[1:]:
         if arg.isdigit():
-            if not code_limit:
+            if code_limit is None:
                 code_limit = int(arg)
-            else:
-                bin_prefix = arg
         elif len(arg) in (2, 3) and arg.isalpha():
             country_filter = arg.upper()
+        elif len(arg) == 6 and arg.isdigit():
+            bin_prefix = arg
         else:
             message_filter = arg.lower()
+
 
 async def check_bin_country(bin6):
     if bin6 in bin_country_cache:
         return bin_country_cache[bin6]
+
     url = f"https://bincheck.io/details/{bin6}"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
-                html = await resp.text()
-                match = re.search(
-                    r"ISO Country Code A2.*?<td[^>]*>([A-Z]{2})</td>", html, re.DOTALL
-                )
+                text = await resp.text()
+                match = re.search(r"ISO Country Code A2.*?>([A-Z]{2})<", text, re.DOTALL)
                 if match:
-                    code = match.group(1).upper()
-                    bin_country_cache[bin6] = code
-                    return code
+                    country = match.group(1)
+                    bin_country_cache[bin6] = country
+                    return country
     except Exception as e:
-        logging.warning(f"BIN check error for {bin6}: {e}")
-    bin_country_cache[bin6] = None
+        logging.warning(f"BIN country lookup failed for {bin6}: {e}")
     return None
 
-async def run_scraper():
-    global OUTPUT_FILE
+
+async def main():
     parse_args()
+    logging.info(f"Starting scraping for group: {target_group}")
 
-    if not os.path.exists(session_name + ".session"):
-        logging.error("❌ Telegram session not found. Please use /login first.")
-        return
+    client = TelegramClient("tg_cli_scraper", api_id, api_hash)
+    await client.start()
+    logging.info("Telegram client started")
 
-    client = TelegramClient(session_name, api_id, api_hash)
-    await client.connect()
+    output_filename = f"Scrap By Raven - {target_group}"
+    if country_filter:
+        output_filename += f" - {country_filter}"
+    if code_limit:
+        output_filename += f" - Limit {code_limit}"
+    output_filename += ".txt"
 
-    if not await client.is_user_authorized():
-        logging.error("❗ Session invalid. Run /login again.")
-        return
-
-    try:
-        entity = await client.get_entity(target_group)
-    except Exception as e:
-        logging.error(f"❌ Cannot access group @{target_group}: {e}")
-        return
-
-    collected = []
-
-    async for message in client.iter_messages(entity, limit=None):
-        if not message.message:
-            continue
-        if message_filter and message_filter not in message.message.lower():
-            continue
-
-        clean = (
-            message.message.replace("｜", "|")
-            .replace("‖", "|")
-            .replace(" ", "")
-            .replace("​", "")
-        )
-        matches = code_regex.findall(clean)
-        for match in matches:
-            full = "|".join(match)
-            if full in found_codes:
+    with open(output_filename, "w", encoding="utf-8") as outfile:
+        async for message in client.iter_messages(target_group, limit=code_limit):
+            if not message.text:
                 continue
-            if bin_prefix and not match[0].startswith(bin_prefix):
+
+            text = message.text.lower()
+            if message_filter and message_filter not in text:
                 continue
-            if country_filter:
-                bin6 = match[0][:6]
-                country = await check_bin_country(bin6)
-                if not country or country_filter.upper() != country.upper():
+
+            cards = code_regex.findall(message.text)
+            for card in cards:
+                card_number, mm, yy, cvv = card
+                if bin_prefix and not card_number.startswith(bin_prefix):
                     continue
-            found_codes.add(full)
-            collected.append(full)
-            logging.info(f"[+] {full}")
-            if code_limit and len(collected) >= code_limit:
-                break
 
-    if collected:
-        OUTPUT_FILE = get_output_filename(len(collected))
-        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-            for c in collected:
-                f.write(c + "\n")
-        logging.info(f"✅ Saved {len(collected)} codes to {OUTPUT_FILE}")
-    else:
-        open("no_valid_codes.signal", "w").close()
-        logging.info("❌ No valid codes found.")
+                # Optional: check BIN country
+                if country_filter:
+                    bin6 = card_number[:6]
+                    country = await check_bin_country(bin6)
+                    if country != country_filter:
+                        continue
+
+                card_line = f"{card_number}|{mm}|{yy}|{cvv}"
+                if card_line not in found_codes:
+                    found_codes.add(card_line)
+                    logging.info(f"Found card: {card_line}")
+                    outfile.write(card_line + "\n")
+
+    await client.disconnect()
+    logging.info(f"Scraping complete. Results saved in {output_filename}")
+
 
 if __name__ == "__main__":
-    asyncio.run(run_scraper())
+    asyncio.run(main())
