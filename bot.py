@@ -44,7 +44,7 @@ async def scrap_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info(f"Scraping triggered with args: {args_str}")
 
     try:
-        subprocess.run(["python", "scraper.py"] + context.args, timeout=900)
+        subprocess.run(["python3", "scraper.py"] + context.args, timeout=900)
         if os.path.exists("no_valid_codes.signal"):
             await update.message.reply_text("❌ No valid codes found.")
             os.remove("no_valid_codes.signal")
