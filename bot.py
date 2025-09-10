@@ -7,7 +7,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 # Credentials (hardcoded as requested)
-BOT_TOKEN = "8230628522:AAEsA-bZrHDsbBxeemKvfRdVYL2XXaZeFkk"
+BOT_TOKEN = "8230628522:AAGlUgb5QvN4MBt5X4CTz-EQR3OcJyN3zNY"
 api_id = 28606113
 api_hash = "2eb35c593e9f213f26d0afb4472396d4"
 
