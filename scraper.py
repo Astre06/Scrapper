@@ -26,10 +26,20 @@ def parse_args():
     args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
 
     if len(args) < 1:
-        logging.error("Usage: scraper.py @group [amount] [bin_prefix] [country] [keyword]")
+        logging.error("Usage: scraper.py @group_or_id [amount] [bin_prefix] [country] [keyword]")
         sys.exit(1)
 
-    target_group = args[0].lstrip("@")
+    first_arg = args[0]
+
+    # ✅ Support @group and -100... style IDs
+    if first_arg.startswith("-100"):
+        try:
+            target_group = int(first_arg)   # Telethon requires int for IDs
+        except ValueError:
+            logging.error("Invalid group ID format.")
+            sys.exit(1)
+    else:
+        target_group = first_arg.lstrip("@")
 
     for arg in args[1:]:
         if arg.isdigit():
