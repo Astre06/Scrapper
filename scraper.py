@@ -8,7 +8,11 @@ from telethon.errors import SessionPasswordNeededError
 
 api_id = 28606113
 api_hash = "2eb35c593e9f213f26d0afb4472396d4"
+
+# Regex matches card formats like:
+# 16 digits | 2 digits (month) | 2 to 4 digits (year) | 3 to 4 digits (cvv)
 code_regex = re.compile(r"\b(\d{16})\|(\d{2})\|(\d{2,4})\|(\d{3,4})\b")
+
 bin_country_cache = {}
 found_codes = set()
 
@@ -23,6 +27,7 @@ logging.basicConfig(level=logging.INFO)
 
 def parse_args():
     global target_group, code_limit, bin_prefix, country_filter, message_filter
+
     args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
 
     if len(args) < 1:
@@ -31,37 +36,51 @@ def parse_args():
 
     first_arg = args[0]
 
-    # ✅ Support @group and -100... style IDs
+    # Support @group and -100... style IDs for Telethon
     if first_arg.startswith("-100"):
         try:
-            target_group = int(first_arg)   # Telethon requires int for IDs
+            target_group = int(first_arg)
         except ValueError:
             logging.error("Invalid group ID format.")
             sys.exit(1)
     else:
         target_group = first_arg.lstrip("@")
 
+    # Reset filters
+    global code_limit, bin_prefix, country_filter, message_filter
+    code_limit = None
+    bin_prefix = None
+    country_filter = None
+    message_filter = None
+
+    potential_filters = []
+
     for arg in args[1:]:
-        if arg.isdigit():
-            if code_limit is None:
-                code_limit = int(arg)
-        elif len(arg) in (2, 3) and arg.isalpha():
-            country_filter = arg.upper()
+        if arg.isdigit() and code_limit is None:
+            code_limit = int(arg)
         elif len(arg) == 6 and arg.isdigit():
             bin_prefix = arg
+        elif len(arg) in (2, 3) and arg.isalpha():
+            country_filter = arg.upper()
         else:
-            message_filter = arg.lower()
+            potential_filters.append(arg)
+
+    if potential_filters:
+        # Join all remaining args as comma-separated filters, converted to lowercase
+        message_filter = ",".join(potential_filters).lower()
 
 
-async def check_bin_country(bin6):
+async def check_bin_country(bin6: str):
     if bin6 in bin_country_cache:
         return bin_country_cache[bin6]
 
     url = f"https://bincheck.io/details/{bin6}"
+
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 text = await resp.text()
+                # HTML entity converted from original &gt; and &lt; due to format — adapt if necessary
                 match = re.search(r"ISO Country Code A2.*?>([A-Z]{2})<", text, re.DOTALL)
                 if match:
                     country = match.group(1)
@@ -69,6 +88,7 @@ async def check_bin_country(bin6):
                     return country
     except Exception as e:
         logging.warning(f"BIN country lookup failed for {bin6}: {e}")
+
     return None
 
 
@@ -87,22 +107,32 @@ async def main():
         output_filename += f" - Limit {code_limit}"
     output_filename += ".txt"
 
+    # Will hold unique cards found during processing
+    global found_codes
+
     with open(output_filename, "w", encoding="utf-8") as outfile:
         async for message in client.iter_messages(target_group, limit=code_limit):
             if not message.text:
                 continue
 
             text = message.text.lower()
-            if message_filter and message_filter not in text:
-                continue
 
+            # Filter messages by keywords if message_filter is set
+            if message_filter:
+                filters = [f.strip() for f in message_filter.split(",")]
+                if not any(f in text for f in filters):
+                    continue  # Skip messages without any filter keyword
+
+            # Find all card entries in this message text
             cards = code_regex.findall(message.text)
             for card in cards:
                 card_number, mm, yy, cvv = card
+
+                # Filter by BIN prefix if set
                 if bin_prefix and not card_number.startswith(bin_prefix):
                     continue
 
-                # Optional: check BIN country
+                # Filter by BIN country if set
                 if country_filter:
                     bin6 = card_number[:6]
                     country = await check_bin_country(bin6)
@@ -110,6 +140,8 @@ async def main():
                         continue
 
                 card_line = f"{card_number}|{mm}|{yy}|{cvv}"
+
+                # Avoid duplicate cards
                 if card_line not in found_codes:
                     found_codes.add(card_line)
                     logging.info(f"Found card: {card_line}")
