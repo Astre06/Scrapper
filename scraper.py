@@ -8,7 +8,7 @@ from telethon.errors import SessionPasswordNeededError
 
 api_id = 28606113
 api_hash = "2eb35c593e9f213f26d0afb4472396d4"
-code_regex = re.compile(r"\b(\d{16})\|(\d{2})\|(\d{2})\|(\d{3,4})\b")
+code_regex = re.compile(r"\b(\d{16})\|(\d{2})\|(\d{2,4})\|(\d{3,4})\b")
 bin_country_cache = {}
 found_codes = set()
 
